@@ -2,8 +2,19 @@
 ##############################
 # Provider and VPC Setup
 ##############################
+variable "region" {
+  default = "eu-west-1"
+}
+
+locals {
+  common_tags = {
+    Project = "Terra-demo1"
+    Environment = "Dev"
+  }
+}
+
 provider "aws" {
-  region = "eu-west-1"
+  region = var.region
 }
 
 resource "aws_vpc" "main" {
@@ -20,11 +31,12 @@ resource "aws_internet_gateway" "igw" {
 # Public Subnet for ALB
 ##############################
 resource "aws_subnet" "public" {
+  count                   = 2
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
+  cidr_block              = cidrsubnet("10.0.0.0/16", 8, count.index)
   map_public_ip_on_launch = true
-  availability_zone       = "eu-west-1a"
-  tags = { Name = "public-subnet" }
+  availability_zone       = "${var.region}${element(["a", "b"], count.index)}"
+  tags = { Name = "public-subnet-${count.index}" }
 }
 
 resource "aws_route_table" "public_rt" {
@@ -38,7 +50,8 @@ resource "aws_route" "public_internet_access" {
 }
 
 resource "aws_route_table_association" "public_assoc" {
-  subnet_id      = aws_subnet.public.id
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public_rt.id
 }
 
@@ -116,7 +129,7 @@ resource "aws_lb" "app_lb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = [aws_subnet.public.id]
+  subnets            = aws_subnet.public[*].id  # <-- multiple subnets here
 }
 
 resource "aws_lb_target_group" "tg" {
@@ -183,11 +196,15 @@ resource "aws_db_instance" "primary" {
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
 }
 
+resource "time_sleep" "wait_for_rds" {
+  depends_on = [aws_db_instance.primary]
+  create_duration = "300s" # wait 5 minutes
+}
 resource "aws_db_instance" "replica" {
   count                 = 2
   identifier            = "replica-db-${count.index}"
   replicate_source_db   = aws_db_instance.primary.id
   instance_class        = "db.t3.micro"
   publicly_accessible   = false
-  depends_on            = [aws_db_instance.primary]
+  depends_on            = [time_sleep.wait_for_rds]
 }
