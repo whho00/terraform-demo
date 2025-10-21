@@ -198,7 +198,7 @@ resource "aws_db_instance" "primary" {
 
 resource "time_sleep" "wait_for_rds" {
   depends_on = [aws_db_instance.primary]
-  create_duration = "300s" # wait 5 minutes
+  create_duration = "900s" # wait 15 minutes
 }
 resource "aws_db_instance" "replica" {
   count                 = 2
